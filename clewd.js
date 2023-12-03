@@ -35,7 +35,8 @@ const convertToType = value => {
     const {countTokens} = require('@anthropic-ai/tokenizer');
     const placeholder = Config.padtxt_placeholder || randomBytes(randomInt(5, 15)).toString('hex');
     tokens = countTokens(content);
-    !apiKey && (content = placeholder.repeat(Math.floor(Math.max(1000, Config.Settings.padtxt - tokens) / countTokens(placeholder.trim()))) + '\n\n\n' + content.trim());
+    const padding = placeholder.repeat(Math.floor(Math.max(1000, Config.Settings.padtxt - tokens) / countTokens(placeholder.trim())));
+    content = content.includes('<|padtxt|>') ? content.replace(/<\|padtxt\|>/, padding) : !apiKey ? padding + '\n\n\n' + content.trim() : content;
     return content;
 }, xmlPlot = (content, nonsys = false) => {
     const card = content.includes('<card>');
@@ -117,11 +118,9 @@ const convertToType = value => {
         .replace(/(?<=\n)\n(?=\n)/g, '');
     //确保格式正确
     if (apiKey) {
-        content = content.trim().replace(/^Human:/, '\n\nHuman:')
-            .replace(/(\n\nAssistant|\n\nHuman):(?!.*?\n\n(Assistant|Human):).*$/s, function(match, p1) {return p1 === '\n\nAssistant' ? match : match + '\n\nAssistant: '})
-            .replace(/\s*<\|noAssistant\|>\s*(.*?)(?:\n\nAssistant:)?$/s, '\n\n$1');
-        content.includes('<|reverseHA|>') && (content = content.replace(/\s*<\|reverseHA\|>\s*/g, '\n\n').replace(/\n\n(Assistant|Human):/g, function(match, p1) {return p1 === 'Human' ? '\n\nAssistant:' : '\n\nHuman:'}))
-        return content;
+        content = content.replace(/\n\n(Assistant|Human):(?!.*?\n\n(Assistant|Human):).*$/s, function(match, p1) {return p1 === 'Assistant' ? match : match + '\n\nAssistant: '}).replace(/\s*<\|noAssistant\|>\s*(.*?)(?:\n\nAssistant:\s*)?$/s, '\n\n$1');
+        content.includes('<|reverseHA|>') && (content = content.replace(/\s*<\|reverseHA\|>\s*/g, '\n\n').replace(/\n\n(Assistant|Human):/g, function(match, p1) {return p1 === 'Human' ? '\n\nAssistant:' : '\n\nHuman:'}));
+        return content.trim().replace(/^(Human|Assistant):/, '\n\n$&').replace(/\n\n(Human|Assistant):$/, '$& ');
     } else {
         return content.trim().replace(/^Human:|\n\nAssistant:$/g, '');
     }
@@ -225,14 +224,12 @@ const updateParams = res => {
             method: 'DELETE'
         });
         updateParams(res);
-    } catch (err) { //
-        console.log(`[33mdeleteChat failed[0m`); //
-    } //
+    } catch (err) {console.log(`[33mdeleteChat failed[0m`)}; //
 }, onListen = async () => {
 /***************************** */
     if (Firstlogin) {
         Firstlogin = false;
-        console.log(`[2m${Main}[0m\n[33mhttp://${Config.Ip}:${Config.Port}/v1[0m\n\n${Object.keys(Config.Settings).map((setting => UnknownSettings.includes(setting) ? `??? [31m${setting}: ${Config.Settings[setting]}[0m` : `[1m${setting}:[0m ${ChangedSettings.includes(setting) ? '[33m' : '[36m'}${Config.Settings[setting]}[0m`)).sort().join('\n')}\n`);
+        console.log(`[2m${Main}[0m\n[33mhttp://${Config.Ip}:${Config.Port}/v1[0m\n\n${Object.keys(Config.Settings).map((setting => UnknownSettings?.includes(setting) ? `??? [31m${setting}: ${Config.Settings[setting]}[0m` : `[1m${setting}:[0m ${ChangedSettings?.includes(setting) ? '[33m' : '[36m'}${Config.Settings[setting]}[0m`)).sort().join('\n')}\n`);
         Config.Settings.Superfetch && SuperfetchAvailable(true);
         if (Config.localtunnel) {
             const localtunnel = require('localtunnel');
@@ -258,8 +255,7 @@ const updateParams = res => {
     if ('SET YOUR COOKIE HERE' === Config.Cookie || Config.Cookie?.length < 1) {
         throw Error('Set your cookie inside config.js');
     }
-    !/^sessionKey=/.test(Config.Cookie) && (Config.Cookie += 'sessionKey='); //
-    updateCookies(Config.Cookie);
+    updateCookies(Config.Cookie.replace(/^(sessionKey=)?/, 'sessionKey=')); //updateCookies(Config.Cookie);
     //console.log(`[2m${Main}[0m\n[33mhttp://${Config.Ip}:${Config.Port}/v1[0m\n\n${Object.keys(Config.Settings).map((setting => UnknownSettings.includes(setting) ? `??? [31m${setting}: ${Config.Settings[setting]}[0m` : `[1m${setting}:[0m ${ChangedSettings.includes(setting) ? '[33m' : '[36m'}${Config.Settings[setting]}[0m`)).sort().join('\n')}\n`);
     //Config.Settings.Superfetch && SuperfetchAvailable(true);
     const accRes = await fetch(Config.rProxy + '/api/organizations', {
@@ -387,7 +383,7 @@ const updateParams = res => {
     }
 /***************************** */
 }, writeSettings = async (config, firstRun = false) => {
-    if (process.env.Cookie || process.env.CookieArray) return ChangedSettings = '', UnknownSettings = '';
+    if (process.env.Cookie || process.env.CookieArray) return; //
     write(ConfigPath, `/*\n* https://rentry.org/teralomaniac_clewd\n* https://github.com/teralomaniac/clewd\n*/\n\n// SET YOUR COOKIE BELOW\n\nmodule.exports = ${JSON.stringify(config, null, 4)}\n\n/*\n BufferSize\n * How many characters will be buffered before the AI types once\n * lower = less chance of \`PreventImperson\` working properly\n\n ---\n\n SystemInterval\n * How many messages until \`SystemExperiments alternates\`\n\n ---\n\n Other settings\n * https://gitgud.io/ahsk/clewd/#defaults\n * and\n * https://gitgud.io/ahsk/clewd/-/blob/master/CHANGELOG.md\n */`.trim().replace(/((?<!\r)\n|\r(?!\n))/g, '\r\n'));
     if (firstRun) {
         console.warn('[33mconfig file created!\nedit[0m [1mconfig.js[0m [33mto set your settings and restart the program[0m');
@@ -783,14 +779,14 @@ const updateParams = res => {
                     clewdStream.censored && console.warn('[33mlikely your account is hard-censored[0m');
                     prevImpersonated = clewdStream.impersonated;
                     setTitle('ok ' + bytesToSize(clewdStream.size));
-                    429 == fetchAPI.status ? console.log(`[35mExceeded limit![0m\n`) : console.log(`${200 == fetchAPI.status ? '[32m' : '[33m'}${fetchAPI.status}![0m\n`); //console.log(`${200 == fetchAPI.status ? '[32m' : '[33m'}${fetchAPI.status}![0m\n`);
+                    429 == fetchAPI?.status ? console.log(`[35mExceeded limit![0m\n`) : console.log(`${200 == fetchAPI?.status ? '[32m' : '[33m'}${fetchAPI?.status}![0m\n`); //console.log(`${200 == fetchAPI.status ? '[32m' : '[33m'}${fetchAPI.status}![0m\n`);
                     clewdStream.empty();
                 }
                 if (!apiKey) { //if (prevImpersonated) {
                     await deleteChat(Conversation.uuid);
 /******************************** */
                     changeflag += 1;
-                    if (Config.CookieArray?.length > 0 && (429 == fetchAPI.status || Config.Cookiecounter && changeflag >= Config.Cookiecounter)) {
+                    if (Config.CookieArray?.length > 0 && (429 == fetchAPI?.status || Config.Cookiecounter && changeflag >= Config.Cookiecounter)) {
                         changeflag = 0;
                         CookieChanger.emit('ChangeCookie');
                     }
@@ -864,7 +860,7 @@ const updateParams = res => {
                 Config.Settings[setting] = convertToType(process.env[setting]) ?? Config.Settings[setting];
             }
         } else {
-            Config[key] = key === 'CookieArray' ? (process.env[key]?.split(',')?.map(x => x.replace(/[\[\]"\s]/g, '')) ?? Config[key]) : (convertToType(process.env[key]) ?? Config[key]);
+            Config[key] = key === 'CookieArray' ? (process.env[key]?.match(/(sessionKey=)?sk-ant-sid01-[\w-]{86}-[\w-]{6}AA/g) ?? Config[key]) : (convertToType(process.env[key]) ?? Config[key]);
         }
     }
     Config.rProxy = Config.rProxy ? Config.rProxy.replace(/\/$/, '') : AI.end();
